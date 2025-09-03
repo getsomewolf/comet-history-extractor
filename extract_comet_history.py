@@ -8,9 +8,11 @@ import sqlite3
 import json
 import csv
 import sys
+import argparse
+import re
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 
@@ -28,6 +30,49 @@ class HistoryEntry:
     visits: List[Dict[str, Any]]
     search_terms: List[str]
     category: str  # Will be determined by domain/URL patterns
+
+class ChunkingHelper:
+    """Helper class for handling LLM-compatible chunking"""
+    
+    @staticmethod
+    def parse_chunk_size(chunk_size_str: str) -> int:
+        """Parse chunk size string (e.g., '200k', '1M') to number of tokens"""
+        if not chunk_size_str:
+            return 200000  # Default 200k tokens
+        
+        chunk_size_str = chunk_size_str.upper().strip()
+        
+        # Extract number and unit
+        match = re.match(r'^(\d+(?:\.\d+)?)\s*([KM]?)$', chunk_size_str)
+        if not match:
+            raise ValueError(f"Invalid chunk size format: {chunk_size_str}. Use formats like '200k' or '1M'")
+        
+        number, unit = match.groups()
+        number = float(number)
+        
+        if unit == 'K':
+            result = int(number * 1000)
+        elif unit == 'M':
+            result = int(number * 1000000)
+        else:
+            result = int(number)
+        
+        # Reject zero or negative values
+        if result <= 0:
+            raise ValueError(f"Chunk size must be positive: {chunk_size_str}")
+        
+        return result
+    
+    @staticmethod
+    def estimate_tokens(obj: Any) -> int:
+        """Estimate token count for any object using character count heuristic"""
+        # Convert object to JSON string and count characters
+        json_str = json.dumps(obj, ensure_ascii=False)
+        char_count = len(json_str)
+        
+        # Rough approximation: 4 characters per token for English text
+        # This is a common heuristic used in the industry
+        return max(1, char_count // 4)
 
 class HistoryExtractor:
     """Main class for extracting browser history data"""
@@ -305,13 +350,161 @@ class HistoryExtractor:
                 "newest": max((e.last_visit_time for e in self.history_entries if e.last_visit_time), default="")
             }
         }
+    
+    def chunk_history(self, max_tokens_per_chunk: int) -> List[Tuple[List[HistoryEntry], Dict[str, Any]]]:
+        """
+        Split history entries into chunks based on token limits
+        Returns list of (entries, chunk_metadata) tuples
+        """
+        if not self.history_entries:
+            return []
+        
+        chunks = []
+        current_chunk = []
+        current_tokens = 0
+        chunk_counter = 1
+        
+        # Base metadata structure for each chunk
+        base_metadata = {
+            "extraction_date": datetime.now(timezone.utc).isoformat(),
+            "categories": list(set(entry.category for entry in self.history_entries))
+        }
+        
+        for entry in self.history_entries:
+            # Estimate tokens for this entry
+            entry_tokens = ChunkingHelper.estimate_tokens(asdict(entry))
+            
+            # If this entry alone exceeds chunk limit, put it in its own chunk
+            if entry_tokens > max_tokens_per_chunk:
+                # Save current chunk if it has entries
+                if current_chunk:
+                    chunk_metadata = {
+                        **base_metadata,
+                        "chunk_id": chunk_counter,
+                        "total_entries": len(current_chunk),
+                        "estimated_tokens": current_tokens
+                    }
+                    chunks.append((current_chunk.copy(), chunk_metadata))
+                    chunk_counter += 1
+                    current_chunk = []
+                    current_tokens = 0
+                
+                # Create chunk with just this large entry
+                large_entry_metadata = {
+                    **base_metadata,
+                    "chunk_id": chunk_counter,
+                    "total_entries": 1,
+                    "estimated_tokens": entry_tokens,
+                    "warning": "This chunk exceeds the requested token limit due to a single large entry"
+                }
+                chunks.append(([entry], large_entry_metadata))
+                chunk_counter += 1
+                continue
+            
+            # If adding this entry would exceed the limit, start a new chunk
+            if current_tokens + entry_tokens > max_tokens_per_chunk and current_chunk:
+                chunk_metadata = {
+                    **base_metadata,
+                    "chunk_id": chunk_counter,
+                    "total_entries": len(current_chunk),
+                    "estimated_tokens": current_tokens
+                }
+                chunks.append((current_chunk.copy(), chunk_metadata))
+                chunk_counter += 1
+                current_chunk = []
+                current_tokens = 0
+            
+            current_chunk.append(entry)
+            current_tokens += entry_tokens
+        
+        # Don't forget the last chunk
+        if current_chunk:
+            chunk_metadata = {
+                **base_metadata,
+                "chunk_id": chunk_counter,
+                "total_entries": len(current_chunk),
+                "estimated_tokens": current_tokens
+            }
+            chunks.append((current_chunk, chunk_metadata))
+        
+        # Update total_chunks in all metadata
+        total_chunks = len(chunks)
+        for entries, metadata in chunks:
+            metadata["total_chunks"] = total_chunks
+        
+        return chunks
+    
+    def save_chunks(self, chunks: List[Tuple[List[HistoryEntry], Dict[str, Any]]], 
+                   base_filename: str = "comet_history_chunk") -> bool:
+        """Save chunked history data to multiple JSON files"""
+        try:
+            saved_files = []
+            
+            for entries, metadata in chunks:
+                chunk_id = metadata["chunk_id"]
+                filename = f"{base_filename}_{chunk_id}.json"
+                
+                # Create the chunk data structure
+                chunk_data = {
+                    "chunk_info": metadata,
+                    "history": [asdict(entry) for entry in entries]
+                }
+                
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(chunk_data, f, indent=2, ensure_ascii=False)
+                
+                saved_files.append(filename)
+                print(f"💾 Chunk {chunk_id}/{metadata['total_chunks']} saved to: {filename} "
+                      f"({metadata['total_entries']} entries, ~{metadata['estimated_tokens']:,} tokens)")
+            
+            print(f"\n✅ All {len(chunks)} chunks saved successfully!")
+            print("📁 Files created:")
+            for filename in saved_files:
+                print(f"  • {filename}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error saving chunks: {e}")
+            return False
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description='Extract Comet browser history data for AI processing',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  python extract_comet_history.py                    # Default extraction (single file)
+  python extract_comet_history.py --chunk-size 200k  # Split into 200k token chunks
+  python extract_comet_history.py --chunk-size 1M    # Split into 1M token chunks
+        '''
+    )
+    
+    parser.add_argument(
+        '--chunk-size',
+        type=str,
+        help='Split output into chunks of specified token size (e.g., "200k", "1M"). '
+             'If not specified, outputs a single file.'
+    )
+    
+    parser.add_argument(
+        '--db-path',
+        type=str,
+        default="comet_history_temp.db",
+        help='Path to the Comet browser history database (default: comet_history_temp.db)'
+    )
+    
+    return parser.parse_args()
 
 def main():
     """Main function to extract and save browser history"""
+    args = parse_arguments()
+    
     print("🚀 Starting Comet Browser History Extraction")
     print("=" * 50)
     
-    extractor = HistoryExtractor()
+    extractor = HistoryExtractor(args.db_path)
     
     # Extract data
     if not extractor.extract_data():
@@ -337,27 +530,63 @@ def main():
     # Save data
     print("\n💾 Saving data...")
     
-    # Save JSON (comprehensive format for AI processing)
-    if extractor.save_to_json("comet_history_complete.json"):
-        print("✅ Comprehensive JSON saved")
-    
-    # Save CSV (simplified format for quick review)
-    if extractor.save_to_csv("comet_history_summary.csv"):
-        print("✅ Summary CSV saved")
-    
-    # Save summary statistics
-    try:
-        with open("comet_history_statistics.json", 'w', encoding='utf-8') as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
-        print("✅ Statistics saved")
-    except Exception as e:
-        print(f"❌ Error saving statistics: {e}")
-    
-    print("\n🎉 Extraction completed successfully!")
-    print("\nFiles created:")
-    print("  📄 comet_history_complete.json - Full data for AI processing")
-    print("  📊 comet_history_summary.csv - Quick overview")
-    print("  📈 comet_history_statistics.json - Summary statistics")
+    # Check if chunking is requested
+    if args.chunk_size:
+        try:
+            max_tokens = ChunkingHelper.parse_chunk_size(args.chunk_size)
+            print(f"🔄 Chunking data into {max_tokens:,} token chunks...")
+            
+            # Estimate total tokens for all data
+            total_estimated_tokens = sum(
+                ChunkingHelper.estimate_tokens(asdict(entry)) 
+                for entry in extractor.history_entries
+            )
+            print(f"📊 Estimated total tokens: {total_estimated_tokens:,}")
+            
+            # Create chunks
+            chunks = extractor.chunk_history(max_tokens)
+            
+            if not chunks:
+                print("❌ No data to chunk")
+                sys.exit(1)
+            
+            print(f"✂️  Created {len(chunks)} chunks")
+            
+            # Save chunks
+            if extractor.save_chunks(chunks):
+                print("✅ Chunked data saved successfully")
+            else:
+                print("❌ Failed to save chunks")
+                sys.exit(1)
+                
+        except ValueError as e:
+            print(f"❌ Error with chunk size: {e}")
+            sys.exit(1)
+    else:
+        # Original behavior - single file output
+        print("📄 Saving as single file (no chunking)...")
+        
+        # Save JSON (comprehensive format for AI processing)
+        if extractor.save_to_json("comet_history_complete.json"):
+            print("✅ Comprehensive JSON saved")
+        
+        # Save CSV (simplified format for quick review)  
+        if extractor.save_to_csv("comet_history_summary.csv"):
+            print("✅ Summary CSV saved")
+        
+        # Save summary statistics
+        try:
+            with open("comet_history_statistics.json", 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            print("✅ Statistics saved")
+        except Exception as e:
+            print(f"❌ Error saving statistics: {e}")
+        
+        print("\n🎉 Extraction completed successfully!")
+        print("\nFiles created:")
+        print("  📄 comet_history_complete.json - Full data for AI processing")
+        print("  📊 comet_history_summary.csv - Quick overview") 
+        print("  📈 comet_history_statistics.json - Summary statistics")
     
     print(f"\n💡 You can now use these files with AI tools to filter and organize your {summary.get('total_urls', 0)} URLs!")
 

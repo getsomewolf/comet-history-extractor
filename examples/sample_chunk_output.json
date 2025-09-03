@@ -1,0 +1,79 @@
+{
+  "chunk_info": {
+    "chunk_id": 1,
+    "total_chunks": 2,
+    "total_entries": 3,
+    "estimated_tokens": 1850,
+    "extraction_date": "2025-08-29T20:30:00.000Z",
+    "categories": [
+      "Development & Tech",
+      "Learning & Education",
+      "Other"
+    ]
+  },
+  "history": [
+    {
+      "id": 1,
+      "url": "https://github.com/microsoft/vscode",
+      "title": "GitHub - microsoft/vscode: Visual Studio Code",
+      "visit_count": 15,
+      "typed_count": 3,
+      "last_visit_time": "2025-08-29T18:45:23.000Z",
+      "last_visit_timestamp": 13394145923000000,
+      "domain": "github.com",
+      "visits": [
+        {
+          "visit_time": "2025-08-29T18:45:23.000Z",
+          "visit_timestamp": 13394145923000000,
+          "duration": 120000,
+          "transition": 805306368,
+          "referrer": "https://code.visualstudio.com"
+        }
+      ],
+      "search_terms": ["vscode", "editor"],
+      "category": "Development & Tech"
+    },
+    {
+      "id": 2,
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "title": "Python Tutorial for Beginners - Learn Python Programming",
+      "visit_count": 8,
+      "typed_count": 1,
+      "last_visit_time": "2025-08-29T16:20:15.000Z",
+      "last_visit_timestamp": 13394137215000000,
+      "domain": "www.youtube.com",
+      "visits": [
+        {
+          "visit_time": "2025-08-29T16:20:15.000Z",
+          "visit_timestamp": 13394137215000000,
+          "duration": 1800000,
+          "transition": 805306368,
+          "referrer": ""
+        }
+      ],
+      "search_terms": ["python tutorial"],
+      "category": "Learning & Education"
+    },
+    {
+      "id": 3,
+      "url": "https://example.com/random-page",
+      "title": "Some Random Page Title",
+      "visit_count": 1,
+      "typed_count": 1,
+      "last_visit_time": "2025-08-29T10:15:20.000Z",
+      "last_visit_timestamp": 13394115320000000,
+      "domain": "example.com",
+      "visits": [
+        {
+          "visit_time": "2025-08-29T10:15:20.000Z",
+          "visit_timestamp": 13394115320000000,
+          "duration": 30000,
+          "transition": 805306368,
+          "referrer": ""
+        }
+      ],
+      "search_terms": [],
+      "category": "Other"
+    }
+  ]
+}

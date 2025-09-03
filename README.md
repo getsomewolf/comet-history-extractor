@@ -29,9 +29,17 @@ Comet Browser has security restrictions that prevent its AI assistant from acces
 
 ### 🤖 **AI-Ready Output**
 - **JSON format** for comprehensive AI analysis
-- **CSV format** for spreadsheet compatibility
+- **CSV format** for spreadsheet compatibility  
 - **Statistics file** with browsing insights
 - Pre-categorized URLs by domain patterns
+- **🆕 LLM Chunking** - Split large histories into token-compatible chunks
+
+### 🧠 **Intelligent Chunking for LLMs**
+- **Default 200k token chunks** (compatible with most modern LLMs)
+- **1M token chunks** for models like Perplexity AI and Gemini Pro
+- **Token estimation** based on content analysis
+- **Seamless splitting** without losing data
+- **Chunk metadata** for tracking and organization
 
 ### 🛡️ **Privacy & Security**
 - Runs completely offline
@@ -70,13 +78,24 @@ cd comet-history-extractor
 
 1. **Close Comet Browser** (to unlock the database)
 2. **Run the extractor:**
+   
+   **Basic extraction (single file):**
    ```bash
    python extract_comet_history.py
    ```
+   
+   **🆕 LLM-compatible chunking:**
+   ```bash
+   # Split into 200k token chunks (recommended for most LLMs)
+   python extract_comet_history.py --chunk-size 200k
+   
+   # Split into 1M token chunks (for large context models like Perplexity AI)
+   python extract_comet_history.py --chunk-size 1M
+   ```
+
 3. **Get your organized data:**
-   - `comet_history_complete.json` - Full data for AI processing
-   - `comet_history_summary.csv` - Quick overview spreadsheet
-   - `comet_history_statistics.json` - Browsing insights
+   - **Without chunking:** `comet_history_complete.json`, `comet_history_summary.csv`, `comet_history_statistics.json`
+   - **With chunking:** `comet_history_chunk_1.json`, `comet_history_chunk_2.json`, etc.
 
 ### AI Processing Example
 
@@ -91,6 +110,55 @@ I have 10,000+ URLs in my browser history. Please:
 
 Focus on the most visited and recent resources.
 ```
+
+## 🧠 LLM Chunking Feature
+
+### Why Chunking?
+Large browser histories can exceed the token limits of even modern LLMs, causing:
+- Truncated data processing
+- Failed API calls
+- Loss of important context
+- Need for manual splitting
+
+### Smart Chunking Solution
+Our intelligent chunking feature automatically splits your history into LLM-compatible pieces:
+
+```bash
+# Default chunking (200k tokens) - works with most LLMs
+python extract_comet_history.py --chunk-size 200k
+
+# Large context models (1M tokens) - for Perplexity AI, Gemini Pro
+python extract_comet_history.py --chunk-size 1M
+
+# Custom sizes supported
+python extract_comet_history.py --chunk-size 500k
+```
+
+### Output Format
+Chunked files include metadata for easy tracking:
+```json
+{
+  "chunk_info": {
+    "chunk_id": 1,
+    "total_chunks": 3,
+    "total_entries": 1247,
+    "estimated_tokens": 199850,
+    "extraction_date": "2025-08-29T...",
+    "categories": ["Development & Tech", "Learning & Education", ...]
+  },
+  "history": [
+    // Your history entries here
+  ]
+}
+```
+
+### Recommended Chunk Sizes by LLM
+| LLM | Context Window | Recommended Size |
+|-----|----------------|------------------|
+| GPT-4 Turbo | 128k tokens | `--chunk-size 100k` |
+| Claude 3 | 200k tokens | `--chunk-size 200k` |
+| Perplexity AI | 1M tokens | `--chunk-size 1M` |
+| Gemini Pro | 1M tokens | `--chunk-size 1M` |
 
 ## 📁 Output Files Explained
 
